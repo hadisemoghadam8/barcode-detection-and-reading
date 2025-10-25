@@ -1,11 +1,17 @@
-import cv2
-import numpy as np
+# ==========================================================
+# 📦 File: app/services/crop_utils.py
+# ✂️ وظیفه: برش نواحی شناسایی‌شده از تصویر بر اساس خروجی YOLO
+# ✅ بدون استفاده از cv2
+# ==========================================================
 
-def get_crops(image, results):
+import numpy as np
+from PIL import Image
+
+def get_crops(image: Image.Image, results):
     """
     استخراج برش‌های هر شناسایی‌شده از خروجی YOLO.
     ورودی:
-        image: تصویر اصلی (np.ndarray)
+        image: تصویر اصلی (PIL.Image)
         results: خروجی مدل YOLO از ultralytics
     خروجی:
         لیست از برش‌ها (np.ndarray)
@@ -15,10 +21,14 @@ def get_crops(image, results):
         return crops
 
     boxes = results[0].boxes.xyxy.cpu().numpy().astype(int)
+
     for (x1, y1, x2, y2) in boxes:
+        # اطمینان از داخل محدوده بودن
         x1, y1 = max(0, x1), max(0, y1)
-        x2, y2 = min(image.shape[1], x2), min(image.shape[0], y2)
-        crop = image[y1:y2, x1:x2].copy()
-        crops.append(crop)
+        x2, y2 = min(image.width, x2), min(image.height, y2)
+
+        # برش با PIL
+        crop = image.crop((x1, y1, x2, y2))
+        crops.append(np.array(crop))  # تبدیل به NumPy برای OCR یا پردازش بعدی
 
     return crops

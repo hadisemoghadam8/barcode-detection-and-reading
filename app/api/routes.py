@@ -1,12 +1,18 @@
-# app/api/routes.py
+# ==========================================================
+# 📦 File: app/api/routes.py
+# 📋 وظیفه: API اصلی برای شناسایی بارکد و Batch Code
+# ✅ نسخه بدون OpenCV و pytesseract (استفاده از Pillow + EasyOCR + pyzbar)
+# ==========================================================
+
 from fastapi import APIRouter, File, UploadFile, Form
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from ultralytics import YOLO
 from app.services.crop_utils import get_crops
 from app.services.detection import read_barcode_and_batch
-from PIL import Image
+from PIL import Image, ImageDraw
 from io import BytesIO
-import os, zipfile, json, tempfile, cv2, numpy as np
+import os, zipfile, json, numpy as np
+
 
 router = APIRouter()
 model = YOLO("./app/model/weights/best.pt")
@@ -19,65 +25,75 @@ async def predict_image(
     download_zip: bool = Form(False)
 ):
     try:
-        # خواندن تصویر ارسالی
+        # 📥 خواندن تصویر
         contents = await file.read()
-        nparr = np.frombuffer(contents, np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        img = Image.open(BytesIO(contents)).convert("RGB")
+        img_np = np.array(img)
 
-        # اجرای YOLO برای شناسایی بارکدها
-        results = model(img, conf=threshold)
+        # 🚀 اجرای YOLO
+        results = model(img_np, conf=threshold)
         crops = get_crops(img, results)
 
         response_data = []
-        temp_dir = tempfile.mkdtemp() if download_zip else None
+        labeled_image = img.copy()
+        draw = ImageDraw.Draw(labeled_image)
 
-        # پردازش هر کادر شناسایی‌شده
+        # ✂️ پردازش برش‌ها
         for i, crop in enumerate(crops):
             buffer = BytesIO()
-            Image.fromarray(crop).save(buffer, format="JPEG")
+            crop.save(buffer, format="JPEG")
+            result = read_barcode_and_batch(buffer.getvalue())
 
-            # استخراج اطلاعات بارکد و کد بچ
-            barcode = read_barcode_and_batch(buffer.getvalue())
-
+            # ذخیره نتیجه
             response_data.append({
                 "crop_number": i,
-                "barcode_data": barcode["barcode_data"] if barcode else "No barcode detected",
-                "barcode_type": barcode["barcode_type"] if barcode else None,
+                "barcode_data": result.get("barcode_data"),
+                "barcode_type": result.get("barcode_type"),
+                "barcode_text": result.get("barcode_text"),
             })
 
-            # ذخیره تصویر در پوشه موقت در صورت نیاز
-            if download_zip:
-                crop_path = os.path.join(temp_dir, f"crop_{i}.jpg")
-                cv2.imwrite(crop_path, crop)
+            # رسم مستطیل دور ناحیه‌ها
+            box = results[0].boxes.xyxy[i].cpu().numpy().astype(int)
+            x1, y1, x2, y2 = box
+            draw.rectangle((x1, y1, x2, y2), outline="red", width=3)
 
-        # در صورت درخواست ZIP خروجی
-        if download_zip:
-            labeled_image_array = results[0].plot()
-            labeled_image_array = cv2.cvtColor(labeled_image_array, cv2.COLOR_BGR2RGB)
-            labeled_image = Image.fromarray(labeled_image_array)
-            labeled_image_path = os.path.join(temp_dir, "labeled_image.jpg")
-            labeled_image.save(labeled_image_path, format="JPEG")
+        # اگر ZIP خواسته نشده → فقط JSON برگردون
+        if not download_zip:
+            return JSONResponse({
+                "message": "✅ Barcode detection completed.",
+                "threshold": threshold,
+                "detections": response_data
+            })
 
-            json_path = os.path.join(temp_dir, "barcodes.json")
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(response_data, f, ensure_ascii=False, indent=4)
+        # 🧠 ساخت ZIP در حافظه
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+            # labeled image
+            labeled_bytes = BytesIO()
+            labeled_image.save(labeled_bytes, format="JPEG")
+            labeled_bytes.seek(0)
+            zipf.writestr("labeled_image.jpg", labeled_bytes.read())
 
-            zip_name = f"{os.path.splitext(file.filename)[0]}_barcode_prediction.zip"
-            zip_path = os.path.join(temp_dir, zip_name)
-            with zipfile.ZipFile(zip_path, "w") as zipf:
-                zipf.write(labeled_image_path, "labeled_image.jpg")
-                for i in range(len(crops)):
-                    zipf.write(os.path.join(temp_dir, f"crop_{i}.jpg"), f"crop_{i}.jpg")
-                zipf.write(json_path, "barcodes.json")
+            # crops
+            for i, crop in enumerate(crops):
+                crop_bytes = BytesIO()
+                crop.save(crop_bytes, format="JPEG")
+                crop_bytes.seek(0)
+                zipf.writestr(f"crop_{i}.jpg", crop_bytes.read())
 
-            return FileResponse(zip_path, media_type="application/zip", filename=zip_name)
+            # JSON info
+            zipf.writestr("barcodes.json", json.dumps(response_data, indent=4))
 
-        # بازگشت پاسخ JSON در حالت عادی
-        return JSONResponse({
-            "message": "✅ Barcode detection completed.",
-            "threshold": threshold,
-            "detections": response_data
-        })
+        zip_buffer.seek(0)
+
+        zip_name = f"{os.path.splitext(file.filename)[0]}_barcode_prediction.zip"
+        return StreamingResponse(
+            zip_buffer,
+            media_type="application/zip",
+            headers={"Content-Disposition": f"attachment; filename={zip_name}"}
+        )
 
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
