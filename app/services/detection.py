@@ -1,50 +1,66 @@
 # ===============================================================
 # 📦 File: app/services/detection.py
 # 🧠 وظیفه: خواندن بارکد و Batch Code از تصویر
-# ✅ نسخه‌ی بهینه‌شده با EasyOCR + pyzbar + preprocess
+# ✅ نسخه‌ی Dual OCR (EasyOCR + Tesseract + Preprocess + pyzbar)
 # ===============================================================
 
 import io
 import re
 import numpy as np
 from PIL import Image
+import cv2
 import easyocr
+import pytesseract
 from pyzbar.pyzbar import decode
-import cv2  # فقط برای preprocess در OCR
+
+# اگر در ویندوز هستی و مسیر تسرکت شناخته نمی‌شود، مسیر زیر را تنظیم کن:
+# pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 # --- EasyOCR فقط یک‌بار لود می‌شود ---
 reader = easyocr.Reader(['en'], gpu=False)
 
-# --- Regex انعطاف‌پذیر برای batch code ---
-# (مثل S0P4MR17702892 یا SR21092200)
-BATCH_REGEX = re.compile(r"(S[O0]P\d*M*R*\d{5,}|SR\d{4,10})", re.IGNORECASE)
+# --- Regex جامع برای batch code / MFG / EXP ---
+BATCH_REGEX = re.compile(
+    r"(S[O0]P\d*M*R*\d{5,}|SR\d{4,10}|BATCH\d{2,10}|BTCH\d{2,10}|MFG\d{2,10}|EXP\d{2,10})",
+    re.IGNORECASE,
+)
 
-
-# --- مرحله ۱: بهبود تصویر برای OCR ---
+# ===============================================================
+# 🧩 مرحله ۱: پیش‌پردازش تصویر برای OCR
+# ===============================================================
 def preprocess_for_ocr(img_pil: Image.Image) -> np.ndarray:
-    """افزایش کیفیت OCR با حذف نویز و افزایش کنتراست"""
+    """بهبود تصویر برای OCR"""
     img = np.array(img_pil)
     gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    gray = cv2.convertScaleAbs(gray, alpha=1.6, beta=25)  # کنتراست بیشتر
-    gray = cv2.GaussianBlur(gray, (3, 3), 0)              # حذف نویز
-    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    gray = cv2.convertScaleAbs(gray, alpha=1.7, beta=25)
+    gray = cv2.bilateralFilter(gray, 7, 75, 75)
+    thresh = cv2.adaptiveThreshold(
+        gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 31, 10
+    )
     return cv2.cvtColor(thresh, cv2.COLOR_GRAY2RGB)
 
 
-# --- مرحله ۲: پاک‌سازی متن OCR ---
+# ===============================================================
+# 🧩 مرحله ۲: پاک‌سازی و یکسان‌سازی متن OCR
+# ===============================================================
 def clean_ocr_text(text: str) -> str:
-    """اصلاح اشتباهات متداول OCR"""
+    """اصلاح خطاهای متداول OCR"""
     text = text.upper()
     fixes = {
         "O": "0",
+        "I": "1",
+        "L": "1",
+        "BATCH": "BTCH",
         "S0P": "SOP",
         "SOPP": "SOP",
         "*": "",
         "'": "",
-        " ": "",
         "`": "",
+        " ": "",
         "’": "",
         "‘": "",
+        ":": "",
+        "|": "",
     }
     for k, v in fixes.items():
         text = text.replace(k, v)
@@ -52,7 +68,28 @@ def clean_ocr_text(text: str) -> str:
     return text
 
 
-# --- مرحله ۳: OCR + Barcode Detection ---
+# ===============================================================
+# 🧩 مرحله ۳: OCR با EasyOCR و Tesseract
+# ===============================================================
+def dual_ocr(np_img: np.ndarray) -> str:
+    """خواندن متن با هر دو موتور OCR"""
+    # EasyOCR
+    easy_texts = [r[1] for r in reader.readtext(np_img)]
+    easy_text = " ".join(easy_texts)
+
+    # Tesseract
+    tess_text = pytesseract.image_to_string(
+        cv2.cvtColor(np_img, cv2.COLOR_RGB2BGR),
+        config="--psm 6",
+    )
+
+    combined = easy_text + " " + tess_text
+    return combined.strip()
+
+
+# ===============================================================
+# 🧩 مرحله ۴: OCR + Barcode Detection
+# ===============================================================
 def read_barcode_and_batch(image_bytes: bytes):
     """
     ورودی: تصویر (bytes)
@@ -60,9 +97,9 @@ def read_barcode_and_batch(image_bytes: bytes):
     """
     try:
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        img.thumbnail((1600, 1600))  # برای سرعت بهتر
+        img.thumbnail((1600, 1600))
 
-        # --- بارکدخوانی با pyzbar ---
+        # --- بارکدخوانی ---
         decoded = decode(img)
         if decoded:
             d = decoded[0]
@@ -75,36 +112,31 @@ def read_barcode_and_batch(image_bytes: bytes):
         np_img = preprocess_for_ocr(img)
         h, w = np_img.shape[:2]
 
-        # 🎯 اول: فقط بخش بالا (متن احتمالی)
-        roi_top = np_img[0:int(h * 0.4), :]
-        results_top = reader.readtext(roi_top)
-        raw_text_top = " ".join([r[1] for r in results_top])
+        # OCR در سه ناحیه برای دقت بالاتر
+        rois = [
+            np_img[0:int(h * 0.4), :],        # بالا
+            np_img[int(h * 0.4):int(h * 0.7), :],  # وسط
+            np_img,                            # کل تصویر
+        ]
 
-        # 🧠 دوم: اگر چیزی پیدا نشد، کل تصویر را امتحان کن
-        if not raw_text_top.strip():
-            results_full = reader.readtext(np_img)
-            raw_text_full = " ".join([r[1] for r in results_full])
-            raw_text = raw_text_full
-        else:
-            raw_text = raw_text_top
+        full_text = ""
+        for roi in rois:
+            roi_text = dual_ocr(roi)
+            full_text += " " + roi_text
 
-        # پاک‌سازی متن
-        clean_text = clean_ocr_text(raw_text)
+        clean_text = clean_ocr_text(full_text)
 
-        # --- یافتن batch code معتبر ---
+        # --- یافتن batch code ---
         match = BATCH_REGEX.search(clean_text)
         if match:
             barcode_text = match.group(1).upper()
-        elif clean_text:
-            barcode_text = clean_text[:30]
         else:
-            barcode_text = None
+            barcode_text = clean_text[:30] or "No batch text detected"
 
-        # --- بازگرداندن خروجی ---
         return {
             "barcode_data": barcode_data or "No barcode detected",
             "barcode_type": barcode_type or "Unknown",
-            "barcode_text": barcode_text or "No batch text detected",
+            "barcode_text": barcode_text,
         }
 
     except Exception as e:
