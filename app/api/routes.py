@@ -38,13 +38,13 @@ async def predict_image(
         labeled_image = img.copy()
         draw = ImageDraw.Draw(labeled_image)
 
-        # ✂️ پردازش برش‌ها
+        # ✂️ پردازش هر crop و رسم مستطیل
         for i, crop in enumerate(crops):
             buffer = BytesIO()
             crop.save(buffer, format="JPEG")
             result = read_barcode_and_batch(buffer.getvalue())
 
-            # ذخیره نتیجه
+            # 📊 ذخیره نتیجه در خروجی JSON
             response_data.append({
                 "crop_number": i,
                 "barcode_data": result.get("barcode_data"),
@@ -52,12 +52,24 @@ async def predict_image(
                 "barcode_text": result.get("barcode_text"),
             })
 
-            # رسم مستطیل دور ناحیه‌ها
+            # 🎨 رسم مستطیل با رنگ‌بندی بر اساس تطبیق داده‌ها
             box = results[0].boxes.xyxy[i].cpu().numpy().astype(int)
             x1, y1, x2, y2 = box
-            draw.rectangle((x1, y1, x2, y2), outline="red", width=3)
 
-        # اگر ZIP خواسته نشده → فقط JSON برگردون
+            data = result.get("barcode_data", "")
+            text = result.get("barcode_text", "")
+
+            if not data or not text:
+                color = "yellow"      # یکی از داده‌ها شناسایی نشده
+            elif data.strip() == text.strip():
+                color = "green"       # تطابق کامل
+            else:
+                color = "red"         # عدم تطابق
+
+            draw.rectangle((x1, y1, x2, y2), outline=color, width=4)
+            draw.text((x1, max(0, y1 - 14)), f"{i+1}", fill=color)
+
+        # ⚙️ اگر ZIP خواسته نشده → فقط JSON برگردون
         if not download_zip:
             return JSONResponse({
                 "message": "✅ Barcode detection completed.",
@@ -65,23 +77,23 @@ async def predict_image(
                 "detections": response_data
             })
 
-        # 🧠 ساخت ZIP در حافظه
+        # 📦 ساخت ZIP در حافظه
         zip_buffer = BytesIO()
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
-            # labeled image
+            # تصویر نهایی برچسب‌دار
             labeled_bytes = BytesIO()
             labeled_image.save(labeled_bytes, format="JPEG")
             labeled_bytes.seek(0)
             zipf.writestr("labeled_image.jpg", labeled_bytes.read())
 
-            # crops
+            # برش‌ها
             for i, crop in enumerate(crops):
                 crop_bytes = BytesIO()
                 crop.save(crop_bytes, format="JPEG")
                 crop_bytes.seek(0)
                 zipf.writestr(f"crop_{i}.jpg", crop_bytes.read())
 
-            # JSON info
+            # فایل JSON
             zipf.writestr("barcodes.json", json.dumps(response_data, indent=4))
 
         zip_buffer.seek(0)
@@ -95,5 +107,3 @@ async def predict_image(
 
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
-
-
