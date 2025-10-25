@@ -127,7 +127,7 @@ def read_barcode_and_batch(image_bytes: bytes, bbox: tuple | None = None):
             else:
                 barcode_text = clean_text[:30]
 
-        # --- مرحله ۴: تصحیح خودکار بر اساس شباهت با barcode_data ---
+# --- مرحله ۴: تصحیح خودکار بر اساس شباهت با barcode_data ---
         if barcode_data and barcode_text and barcode_text[:5] in barcode_data:
             barcode_text = barcode_data
 
@@ -143,4 +143,4 @@ def read_barcode_and_batch(image_bytes: bytes, bbox: tuple | None = None):
             "barcode_data": None,
             "barcode_type": None,
             "barcode_text": None,
-        }
+        }                

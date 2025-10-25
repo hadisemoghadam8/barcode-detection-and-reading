@@ -57,6 +57,7 @@ async def predict_image(
         response_data = []
         crops = []
 
+        # --- پردازش هر باکس ---
         for i, box in enumerate(boxes):
             x1, y1, x2, y2 = map(int, box[:4])
             crop = image.crop((x1, y1, x2, y2))
@@ -68,6 +69,7 @@ async def predict_image(
             result["crop_index"] = i
             response_data.append(result)
 
+        # --- فقط JSON (بدون ZIP) ---
         if not download_zip:
             return JSONResponse({
                 "message": "✅ Barcode detection completed.",
@@ -75,16 +77,39 @@ async def predict_image(
                 "detections": response_data
             })
 
+        # ==========================================================
+        # 📸 تولید تصویر با رنگ‌بندی بر اساس تطبیق داده‌ها
+        # ==========================================================
         labeled = image.copy()
         draw = ImageDraw.Draw(labeled)
-        for box in boxes:
-            x1, y1, x2, y2 = map(int, box[:4])
-            draw.rectangle((x1, y1, x2, y2), outline="red", width=3)
 
+        for i, box in enumerate(boxes):
+            x1, y1, x2, y2 = map(int, box[:4])
+            result = response_data[i]
+
+            data = result.get("barcode_data", "")
+            text = result.get("barcode_text", "")
+
+            # 🎨 انتخاب رنگ بر اساس وضعیت تطبیق
+            if not data or not text:
+                color = "yellow"      # بارکد یا متن شناسایی نشده
+            elif data.strip() == text.strip():
+                color = "green"       # تطابق کامل
+            else:
+                color = "red"         # عدم تطابق
+
+            # رسم مستطیل و شماره‌ی باکس
+            draw.rectangle((x1, y1, x2, y2), outline=color, width=4)
+            draw.text((x1, max(0, y1 - 14)), f"{i+1}", fill=color)
+
+        # ذخیره در حافظه
         labeled_bytes = BytesIO()
         labeled.save(labeled_bytes, format="JPEG")
         labeled_bytes.seek(0)
 
+        # ==========================================================
+        # 📦 ساخت ZIP شامل تصویر رنگی + برش‌ها + JSON
+        # ==========================================================
         zip_buffer = BytesIO()
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
             zipf.writestr("labeled_image.jpg", labeled_bytes.read())
