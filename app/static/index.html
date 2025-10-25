@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Barcode Detector</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>📷 Barcode Detection</h1>
+        <p class="subtitle">Upload an image and detect barcodes automatically.</p>
+
+        <form id="uploadForm">
+            <div class="form-group">
+                <label for="fileInput">Select an image:</label>
+                <input type="file" id="fileInput" name="file" accept="image/*" required>
+            </div>
+
+            <div class="form-group">
+                <label for="thresholdInput">Confidence Threshold:</label>
+                <input type="range" id="thresholdInput" name="threshold" min="0" max="1" step="0.01" value="0.5" oninput="thresholdValue.innerText = this.value">
+                <span id="thresholdValue">0.5</span>
+            </div>
+
+            <div class="form-group checkbox">
+                <input type="checkbox" id="downloadZip" name="download_zip">
+                <label for="downloadZip">Download results as ZIP</label>
+            </div>
+
+            <button type="submit" class="btn">Detect Barcode</button>
+        </form>
+
+        <div class="results">
+            <h2>Detected Barcodes:</h2>
+            <ul id="barcodeList"></ul>
+            <img id="labeledImage" src="" alt="" style="display:none;"/>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById("uploadForm");
+        const barcodeList = document.getElementById("barcodeList");
+        const labeledImage = document.getElementById("labeledImage");
+
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+
+            const fileInput = document.getElementById("fileInput").files[0];
+            const thresholdInput = document.getElementById("thresholdInput").value;
+            const downloadZip = document.getElementById("downloadZip").checked;
+            const formData = new FormData();
+            formData.append("file", fileInput);
+            formData.append("threshold", thresholdInput);
+            formData.append("download_zip", downloadZip);
+
+            try {
+                const response = await fetch("http://127.0.0.1:8000/predict/", {
+                    method: "POST",
+                    body: formData
+                });
+
+                if (response.ok) {
+                    if (downloadZip) {
+                        const zipBlob = await response.blob();
+                        const url = window.URL.createObjectURL(zipBlob);
+                        const zipFileName = fileInput.name.split(".")[0] + "_barcode_prediction.zip";
+
+                        const zipLink = document.createElement("a");
+                        zipLink.href = url;
+                        zipLink.download = zipFileName;
+                        document.body.appendChild(zipLink);
+                        zipLink.click();
+                        zipLink.remove();
+                    } else {
+                        const data = await response.json();
+                        barcodeList.innerHTML = "";
+                        data.forEach((item) => {
+                            const listItem = document.createElement("li");
+                            listItem.textContent = `Crop #${item.crop_number}: ${item.barcode_detected}`;
+                            barcodeList.appendChild(listItem);
+                        });
+                    }
+                } else {
+                    const data = await response.json();
+                    alert("Error: " + data.error);
+                }
+            } catch (error) {
+                alert("Request failed. Check console for details.");
+                console.error(error);
+            }
+        });
+    </script>
+</body>
+</html>

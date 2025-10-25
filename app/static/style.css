@@ -1,0 +1,94 @@
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #f4f7fc, #dce3f0);
+    color: #333;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100vh;
+}
+
+.container {
+    background: #fff;
+    margin-top: 60px;
+    padding: 30px 40px;
+    border-radius: 15px;
+    box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+    text-align: center;
+    width: 90%;
+    max-width: 500px;
+}
+
+h1 {
+    color: #4A90E2;
+    margin-bottom: 10px;
+}
+
+.subtitle {
+    color: #666;
+    font-size: 0.95rem;
+    margin-bottom: 25px;
+}
+
+.form-group {
+    margin-bottom: 20px;
+    text-align: left;
+}
+
+label {
+    font-weight: 600;
+    display: block;
+    margin-bottom: 8px;
+}
+
+input[type="file"],
+input[type="range"] {
+    width: 100%;
+}
+
+.checkbox {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.btn {
+    background-color: #4A90E2;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+.btn:hover {
+    background-color: #357ABD;
+}
+
+.results {
+    margin-top: 30px;
+    text-align: left;
+}
+
+.results h2 {
+    color: #444;
+    margin-bottom: 10px;
+}
+
+ul {
+    list-style-type: none;
+    padding: 0;
+}
+
+li {
+    background: #f7f9fc;
+    border: 1px solid #e0e6ef;
+    padding: 8px 12px;
+    border-radius: 6px;
+    margin-bottom: 6px;
+}

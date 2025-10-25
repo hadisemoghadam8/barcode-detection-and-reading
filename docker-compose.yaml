@@ -1,0 +1,14 @@
+
+services:
+  barcode-api:
+    build:
+      context: .        # مسیر پروژه (همین پوشه)
+      dockerfile: Dockerfile
+    container_name: barcode-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app          # برای sync کردن کد لوکال با داخل کانتینر
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped

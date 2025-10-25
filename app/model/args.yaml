@@ -1,0 +1,117 @@
+task: detect #نوع وظیفه‌ی YOLO — اینجا تشخیص اشیاء (object detection) هست
+mode: train #حالت اجرا — یعنی این تنظیمات برای مرحله‌ی آموزش استفاده شده
+model: yolov8n.pt #مدل پایه‌ای که آموزش ازش شروع شده
+data: ./labeled_data/dataset.yaml #مسیر فایل داده‌ها (train/val/images و کلاس‌ها در این YAML تعریف شدن).
+epochs: 100 #تعداد دورهای کامل آموزش روی دیتاست
+time: 5 #محدودیت زمانی آموزش (به ساعت).
+patience: 4   #توقف زودهنگام در صورت عدم پیشرفت ۴ epoch.
+batch: 32 #تعداد تصاویری که همزمان در هر مرحله پردازش می‌شن.
+imgsz: 640 #اندازه‌ی ورودی تصاویر (در پیکسل) برای مدل.
+save: true  #ذخیره‌ی نتایج و وزن‌های مدل فعال است.
+save_period: -1  #فقط مدل نهایی ذخیره می‌شود (نه بعد از هر epoch)
+cache: false  #تصاویر برای آموزش در RAM کش نمی‌شن (برای سرعت).
+device: cpu    #آموزش روی CPU انجام شده (می‌تونه GPU هم باشه مثلاً cuda:0).
+workers: 8 #تعداد پردازشگر برای بارگذاری داده‌ها.
+project: null  #مسیر پوشه‌ای که نتایج در اون ذخیره می‌شن (اینجا پیش‌فرض runs/ هست).
+name: train5  #نام پوشه‌ی ذخیره‌ی نتایج (runs/detect/train5).
+exist_ok: false  #اگر پروژه‌ای با همون نام وجود داشته باشه، خطا می‌ده (overwrite نمی‌کنه).
+pretrained: true  #استفاده از وزن‌های ازپیش‌آموزش‌داده‌شده (transfer learning).
+optimizer: auto  #نوع بهینه‌ساز (AdamW یا SGD) به صورت خودکار انتخاب می‌شه.
+verbose: true  #نمایش جزئیات کامل در لاگ آموزش.
+seed: 0 #مقدار بذر تصادفی برای تکرارپذیری نتایج.
+deterministic: true  #آموزش مدل به‌صورت قابل‌تکرار (deterministic) انجام بشه
+single_cls: false   #یعنی مدل چندکلاسه است (فقط یه کلاس نیست).
+rect: false  #حفظ نسبت ابعاد تصاویر در batch (غیرفعال).
+cos_lr: false  #غیرفعال بودن کاهش نرخ یادگیری به‌صورت کسینوسی.
+close_mosaic: 10  #غیرفعال شدن mosaic در ۱۰ epoch آخر.
+resume: false  #آموزش از checkpoint قبلی ادامه داده نمی‌شه.
+amp: true  #استفاده از محاسبات mixed-precision (برای سرعت بیشتر).
+fraction: 1.0  #درصد استفاده از داده‌ها برای آموزش (۱=کل داده).
+profile: false  #غیرفعال بودن پروفایل‌گیری زمان مراحل آموزش.
+freeze: null  #بدون فریزکردن لایه‌ها (همه آموزش می‌بینن).
+multi_scale: false  #غیرفعال بودن آموزش با اندازه‌های مختلف تصویر.
+overlap_mask: true  #اجازه‌ی هم‌پوشانی ماسک‌ها در مدل‌های segmentation (در detect بی‌اثر).
+mask_ratio: 4  #نسبت اندازه ماسک (در detect بی‌اثر).
+dropout: 0.0  #غیرفعال بودن Dropout.
+val: true  #بعد از هر epoch روی داده‌ی validation ارزیابی انجام می‌شه.
+split: val   #استفاده از داده‌ی اعتبارسنجی برای ارزیابی.
+save_json: false  #خروج نتایج validation به فرمت JSON (غیرفعال).
+save_hybrid: false  #ترکیب خروجی‌های نهایی و میانی (غیرفعال).
+conf: null  #آستانه‌ی پیش‌فرض برای confidence.
+iou: 0.7  #آستانه‌ی IOU برای ارزیابی دقت تشخیص‌ها.
+max_det: 300  #حداکثر تعداد اشیایی که در هر تصویر می‌تونه تشخیص بده.
+half: false  #غیرفعال بودن حالت نیم‌دقت (float16) در آموزش.
+dnn: false  #استفاده نکردن از backend DNN برای inference.
+plots: true   #نمودارهای آموزش (مثل loss و accuracy) رسم می‌شن.
+source: null  #مسیر ورودی داده (در train استفاده نمی‌شود).
+vid_stride: 1  #پردازش همه‌ی فریم‌ها در ویدیو.
+stream_buffer: false  #غیرفعال بودن بافر در حالت استریم.
+visualize: false  #عدم نمایش لایه‌های درونی مدل.
+augment: true  #افزایش داده در زمان آموزش فعال است
+agnostic_nms: false  #NMS جداگانه برای هر کلاس انجام می‌شود.
+classes: null  #تمام کلاس‌ها در آموزش لحاظ می‌شوند.
+retina_masks: false   #حالت دقیق‌تر ماسک (غیرفعال).
+embed: null  #بدون خروج embedding از مدل.
+show: false  #عدم نمایش خروجی تصویر حین اجرا.
+
+save_frames: false  #عدم ذخیره فریم‌های خروجی در حالت ویدیو.
+save_txt: false  #عدم ذخیره‌ی خروجی به‌صورت فایل متنی.
+save_conf: false  #عدم ذخیره‌ی مقادیر confidence در فایل خروجی.
+save_crop: false  #عدم ذخیره‌ی برش اشیاء شناسایی‌شده.
+
+show_labels: true
+show_conf: true #در خروجی تصویری، برچسب، درصد اطمینان و باکس نمایش داده می‌شن.
+show_boxes: true
+
+
+line_width: null  #ضخامت پیش‌فرض برای خطوط باکس‌ها.
+format: torchscript  #خروجی مدل در فرمت TorchScript.
+keras: false   #خروجی Keras غیرفعال است.
+optimize: false  #بهینه‌سازی مدل در export انجام نمی‌شود.
+int8: false  #کوانتیزه‌کردن به INT8 غیرفعال است.
+dynamic: false  #ورودی با اندازه ثابت.
+simplify: false  #ساده‌سازی گراف مدل غیرفعال.
+opset: null  #نسخه‌ی پیش‌فرض ONNX opset.
+workspace: 4  #حافظه تخصیص‌یافته برای export (۴GB).
+nms: false  #استفاده از NMS پیش‌فرض YOLO.
+lr0: 0.01  #نرخ یادگیری اولیه
+lrf: 0.01  #نرخ یادگیری نهایی (در انتهای آموزش).
+momentum: 0.937  #مقدار مومنتوم برای بهینه‌ساز (پایداری در یادگیری).
+weight_decay: 0.0005  #کاهش وزن برای جلوگیری از overfitting
+
+warmup_epochs: 3.0  #چند epoch اول با یادگیری آرام شروع می‌شود.
+warmup_momentum: 0.8  #مقدار مومنتوم در فاز warmup.
+warmup_bias_lr: 0.1  #نرخ یادگیری اولیه برای biasها در warmup.
+
+box: 7.5
+cls: 0.5  #ضرایب وزن‌دهی برای lossهای مختلف (box regression, classification, distribution focal loss).
+dfl: 1.5
+
+pose: 12.0  #وزن loss مربوط به pose estimation.
+kobj: 1.0  #وزن loss بخش objectness.
+label_smoothing: 0.0  #صاف‌سازی برچسب‌ها برای جلوگیری از overfitting (اینجا غیرفعال).
+nbs: 64 #batch نرمال برای تنظیم lr.
+
+
+hsv_h: 0.015
+hsv_s: 0.7  #تغییرات رنگ، اشباع و روشنایی تصویر برای افزایش تنوع داده‌ها.
+hsv_v: 0.4
+
+
+degrees: 0.0  #بدون چرخش تصادفی در افزایش داده.
+translate: 0.1  #جابه‌جایی تصادفی تصویر تا ۱۰٪.
+scale: 0.5   #بزرگ‌/کوچک‌کردن تصویر تا ۵۰٪.
+shear: 0.0  #بدون برش مورب (shearing) در افزایش داده.
+perspective: 0.0  #بدون تغییر پرسپکتیو تصویر.
+flipud: 0.0  #احتمال صفر برای برعکس کردن عمودی تصویر.
+fliplr: 0.5  #احتمال برعکس کردن افقی تصویر (چپ↔راست).
+bgr: 0.0  #بدون جابه‌جایی کانال‌های رنگ (BGR↔RGB).
+mosaic: 1.0 #ترکیب ۴ تصویر برای تنوع بیشتر (ویژگی خاص YOLO).
+mixup: 0.0 #ترکیب تصادفی دو تصویر (اینجا غیرفعاله).
+copy_paste: 0.0  #غیرفعال بودن روش copy-paste augmentation.
+auto_augment: randaugment  #استفاده از استراتژی خودکار افزایش داده.
+erasing: 0.4  #پاک کردن تصادفی بخشی از تصویر (برای robust بودن مدل).
+crop_fraction: 1.0  #استفاده از کل تصویر بدون برش.
+cfg: null  #بدون فایل پیکربندی اضافی برای ساختار مدل.
+tracker: botsort.yaml  #فایل تنظیمات ردیاب (برای tracking در ویدیو).
+save_dir: runs/detect/train5  #مسیر ذخیره‌ی خروجی‌ها و نتایج آموزش.
