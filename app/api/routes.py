@@ -1,7 +1,7 @@
 # ==========================================================
 # 📦 File: app/api/routes.py
-# 📋 وظیفه: API اصلی برای شناسایی بارکد و Batch Code
-# ✅ نسخه بدون OpenCV و pytesseract (استفاده از Pillow + EasyOCR + pyzbar)
+# 📋 وظیفه: API اصلی برای شناسایی بارکدها
+# ✅ نسخه نهایی هماهنگ با حذف Batch و شمارش تکراری‌ها
 # ==========================================================
 
 from fastapi import APIRouter, File, UploadFile, Form
@@ -12,7 +12,9 @@ from app.services.detection import read_barcode_and_batch
 from PIL import Image, ImageDraw
 from io import BytesIO
 import os, zipfile, json, numpy as np
-
+from collections import Counter
+import re
+from urllib.parse import quote
 
 router = APIRouter()
 model = YOLO("./app/model/weights/best.pt")
@@ -25,12 +27,12 @@ async def predict_image(
     download_zip: bool = Form(False)
 ):
     try:
-        # 📥 خواندن تصویر
+        # 📥 خواندن تصویر ورودی
         contents = await file.read()
         img = Image.open(BytesIO(contents)).convert("RGB")
         img_np = np.array(img)
 
-        # 🚀 اجرای YOLO
+        # 🚀 اجرای YOLO برای پیدا کردن نواحی بارکد
         results = model(img_np, conf=threshold)
         crops = get_crops(img, results)
 
@@ -38,49 +40,83 @@ async def predict_image(
         labeled_image = img.copy()
         draw = ImageDraw.Draw(labeled_image)
 
-        # ✂️ پردازش هر crop و رسم مستطیل
+        # ✂️ پردازش هر ناحیه جداگانه (crop)
         for i, crop in enumerate(crops):
             buffer = BytesIO()
             crop.save(buffer, format="JPEG")
             result = read_barcode_and_batch(buffer.getvalue())
 
-            # 📊 ذخیره نتیجه در خروجی JSON
-            response_data.append({
-                "crop_number": i,
-                "barcode_data": result.get("barcode_data"),
-                "barcode_type": result.get("barcode_type"),
-                "barcode_text": result.get("barcode_text"),
-            })
+            # تابع جدید خروجی‌اش شامل لیست results است
+            for r in result.get("results", []):
+                response_data.append({
+                    "crop_index": i,
+                    "barcode_data": r.get("barcode_data"),
+                    "barcode_type": r.get("barcode_type"),
+                    "barcode_text": r.get("barcode_text"),
+                })
 
-            # 🎨 رسم مستطیل با رنگ‌بندی بر اساس تطبیق داده‌ها
-            box = results[0].boxes.xyxy[i].cpu().numpy().astype(int)
-            x1, y1, x2, y2 = box
+        # 🧮 شمارش بارکدها
+        all_barcodes = [
+            d["barcode_data"]
+            for d in response_data
+            if d["barcode_data"] and d["barcode_data"] != "No barcode detected"
+        ]
+        barcode_counts = Counter(all_barcodes)
 
-            data = result.get("barcode_data", "")
-            text = result.get("barcode_text", "")
+        total_barcodes = len(all_barcodes)
+        unique_barcodes = len(barcode_counts)
+        duplicate_barcodes = sum(1 for c in barcode_counts.values() if c > 1)
+        duplicates = {code: c for code, c in barcode_counts.items() if c > 1}
 
-            if not data or not text:
-                color = "yellow"      # یکی از داده‌ها شناسایی نشده
-            elif data.strip() == text.strip():
-                color = "green"       # تطابق کامل
-            else:
-                color = "red"         # عدم تطابق
+        # 🔢 افزودن شمارش تکرار به هر رکورد
+        for item in response_data:
+            data = item.get("barcode_data")
+            count = barcode_counts.get(data, 0)
+            item["count"] = count
+            item["is_duplicate"] = count > 1
 
-            draw.rectangle((x1, y1, x2, y2), outline=color, width=4)
-            draw.text((x1, max(0, y1 - 14)), f"{i+1}", fill=color)
+        # 🎨 رسم کادر برای هر ناحیه تشخیص داده‌شده
+        for i, item in enumerate(response_data):
+            try:
+                box = results[0].boxes.xyxy[i].cpu().numpy().astype(int)
+                x1, y1, x2, y2 = box
 
-        # ⚙️ اگر ZIP خواسته نشده → فقط JSON برگردون
+                data = item["barcode_data"] or ""
+                count = item["count"]
+
+                # رنگ سبز برای شناسایی، قرمز برای ناموفق
+                if not data or data == "No barcode detected":
+                    color = "red"
+                else:
+                    color = "green"
+
+                label_text = f"x{count}"
+                draw.rectangle((x1, y1, x2, y2), outline=color, width=4)
+                draw.text((x1, max(0, y1 - 18)), label_text, fill=color)
+            except Exception:
+                continue
+
+        # 📊 آمار کلی
+        stats = {
+            "total_barcodes_detected": total_barcodes,
+            "unique_barcodes": unique_barcodes,
+            "duplicate_barcodes": duplicate_barcodes,
+            "duplicates": duplicates
+        }
+
+        # ⚙️ اگر کاربر ZIP نخواسته، فقط JSON برگردون
         if not download_zip:
             return JSONResponse({
                 "message": "✅ Barcode detection completed.",
                 "threshold": threshold,
+                **stats,
                 "detections": response_data
             })
 
-        # 📦 ساخت ZIP در حافظه
+        # 📦 ساخت ZIP خروجی
         zip_buffer = BytesIO()
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
-            # تصویر نهایی برچسب‌دار
+            # تصویر نهایی با برچسب‌ها
             labeled_bytes = BytesIO()
             labeled_image.save(labeled_bytes, format="JPEG")
             labeled_bytes.seek(0)
@@ -93,16 +129,25 @@ async def predict_image(
                 crop_bytes.seek(0)
                 zipf.writestr(f"crop_{i}.jpg", crop_bytes.read())
 
-            # فایل JSON
-            zipf.writestr("barcodes.json", json.dumps(response_data, indent=4))
+            # JSON خروجی
+            zipf.writestr("barcodes.json", json.dumps({
+                **stats,
+                "detections": response_data
+            }, indent=4, ensure_ascii=False))
 
         zip_buffer.seek(0)
 
-        zip_name = f"{os.path.splitext(file.filename)[0]}_barcode_prediction.zip"
+        # ✅ پشتیبانی از نام فارسی در ZIP
+        orig_name = os.path.splitext(file.filename)[0]
+        zip_filename = f"{orig_name}_barcode_prediction.zip"
+        ascii_fallback = re.sub(r'[^\x00-\x7F]+', '_', zip_filename)
+        quoted = quote(zip_filename, safe='')
+        content_disposition = f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{quoted}'
+
         return StreamingResponse(
             zip_buffer,
             media_type="application/zip",
-            headers={"Content-Disposition": f"attachment; filename={zip_name}"}
+            headers={"Content-Disposition": content_disposition}
         )
 
     except Exception as e:
