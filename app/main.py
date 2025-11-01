@@ -10,6 +10,7 @@ from io import BytesIO
 from app.services.detection import read_barcode_and_batch
 from app.core.config import settings
 from app.services.barcode_rules import ikco, generic, saipa
+from PIL import Image, ImageDraw, ImageFont
 
 import numpy as np
 import zipfile
@@ -155,10 +156,15 @@ async def predict_image(
             count = barcode_counts.get(data, 0)
             item["count"] = count
             item["is_duplicate"] = count > 1
-
-        # --- ترسیم مستطیل‌ها ---
+        # --- ترسیم مستطیل‌ها (بهبود یافته) ---
         labeled = image.copy()
         draw = ImageDraw.Draw(labeled)
+        img_w, img_h = image.size
+
+        try:
+            font_path = "arial.ttf"  # در لینوکس: "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+        except:
+            font_path = None
 
         for i, box in enumerate(boxes):
             x1, y1, x2, y2 = map(int, box[:4])
@@ -167,6 +173,7 @@ async def predict_image(
             count = item.get("count", 0)
             allowed = int(item.get("print_repeat_count", 1))
 
+            # تعیین رنگ
             if not data or data == "No barcode detected":
                 color = "red"
                 label_text = "x0"
@@ -178,7 +185,37 @@ async def predict_image(
                 label_text = f"x{count}"
 
             draw.rectangle((x1, y1, x2, y2), outline=color, width=3)
-            draw.text((x1, max(0, y1 - 18)), label_text, fill=color)
+
+            # تنظیم خودکار اندازه فونت متناسب با ارتفاع باکس
+            box_height = max(20, y2 - y1)
+            font_size = max(24, int(box_height * 0.25))  # متناسب با اندازه باکس
+            try:
+                font = ImageFont.truetype(font_path, font_size) if font_path else ImageFont.load_default()
+            except:
+                font = ImageFont.load_default()
+
+            # محاسبه اندازه متن
+            try:
+                text_bbox = draw.textbbox((0, 0), label_text, font=font)
+                text_w = text_bbox[2] - text_bbox[0]
+                text_h = text_bbox[3] - text_bbox[1]
+            except:
+                text_w, text_h = draw.textsize(label_text, font=font)
+
+            # موقعیت: داخل یا بالای باکس
+            text_x = x1 + 8
+            text_y = max(0, y1 - text_h - 10)  # همیشه بالای باکس
+
+            # پس‌زمینه‌ی سفید برای وضوح متن
+            bg_padding = 4
+            draw.rectangle(
+                (text_x - bg_padding, text_y - bg_padding,
+                text_x + text_w + bg_padding, text_y + text_h + bg_padding),
+                fill="white"
+            )
+
+            # نوشتن متن
+            draw.text((text_x, text_y), label_text, fill=color, font=font)
 
         # --- اطلاعات پارت ---
         part_info = {
