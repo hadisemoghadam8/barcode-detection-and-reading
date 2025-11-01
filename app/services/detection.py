@@ -66,9 +66,10 @@ def read_barcode_and_batch(image_bytes: bytes):
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         np_img = np.array(img)
 
+        # --- مرحله ۱: خواندن خود بارکد با pyzbar ---
         decoded = zbar_decode(img)
         if not decoded:
-            decoded = opencv_decode(np_img)
+            decoded = opencv_decode(np_img)  # fallback
 
         if not decoded:
             return {
@@ -80,14 +81,37 @@ def read_barcode_and_batch(image_bytes: bytes):
         d = decoded[0]
         if isinstance(d, dict):
             data, btype = d["data"], d["type"]
+            rect = (0, 0, np_img.shape[1], np_img.shape[0])
         else:
-            data, btype = d.data.decode("utf-8", errors="ignore"), d.type
+            data, btype, rect = d.data.decode("utf-8", errors="ignore"), d.type, d.rect
 
-        # فقط داده‌ی واقعی بارکد
+        # --- مرحله ۲: OCR روی متن زیر بارکد ---
+        x, y, w, h = rect
+        y2 = y + h
+        roi = np_img[y2 + 5:y2 + 45, max(0, x - 5):x + w + 5]
+        if roi.size == 0:
+            roi = np_img[y:y + h, x:x + w]
+
+        roi_prep = preprocess_for_ocr(Image.fromarray(roi))
+        ocr_result = reader.readtext(roi_prep)
+
+        texts = [t[1] for t in ocr_result if len(t[1]) > 2]
+        raw_text = " ".join(texts)
+        clean_text = clean_ocr_text(raw_text)
+
+        if clean_text and len(clean_text) > 6:
+            half = len(clean_text) // 2
+            if clean_text[:half] == clean_text[half:]:
+                clean_text = clean_text[:half]
+
+        # در صورت OCR ضعیف
+        if clean_text and len(clean_text) < 5:
+            clean_text = data
+
         return {
             "barcode_data": data or None,
             "barcode_type": btype or None,
-            "barcode_text": None
+            "barcode_text": clean_text or (data or None)
         }
 
     except Exception as e:
