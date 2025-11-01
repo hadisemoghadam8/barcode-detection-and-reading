@@ -11,6 +11,7 @@ from app.services.detection import read_barcode_and_batch
 from app.core.config import settings
 from app.services.barcode_rules import ikco, generic, saipa
 from PIL import Image, ImageDraw, ImageFont
+from app.services.part_lookup import get_part_info_from_csv
 
 import numpy as np
 import zipfile
@@ -102,7 +103,7 @@ async def predict_image(
                 crop.save(buffer, format="JPEG")
 
                 result = read_barcode_and_batch(buffer.getvalue()) or {}
-                print(f"[DEBUG] Crop {i} OCR result: {result}") #برای اینکه ببینی دقیقاً تابع چی برمی‌گردونه، برای موقت   
+                # print(f"[DEBUG] Crop {i} OCR result: {result}") #برای اینکه ببینی دقیقاً تابع چی برمی‌گردونه، برای موقت   
                 barcode_data = result.get("barcode_data", None)
 
 
@@ -218,18 +219,30 @@ async def predict_image(
             draw.text((text_x, text_y), label_text, fill=color, font=font)
 
         # --- اطلاعات پارت ---
+
         part_info = {
             "part_code": None,
             "manufacturer": None,
-            "serial_prefix": None
+            "PartName": None,
+            "PartNumber": None,
+            "PrintRepeatCount": None
         }
 
-        first_valid = next((item for item in response_data if item.get("part_code")), None)
+        first_valid = next((item for item in response_data if item.get("barcode_data")), None)
         if first_valid:
-            part_info["part_code"] = first_valid.get("part_code")
+            barcode = first_valid.get("barcode_data")
+
+            # استخراج PartCode از رنج 3:5 (یعنی کاراکترهای 3 و 4)
+            # اگر منظورت 3 رقم بود (مثلاً 3،4،5)، بنویس barcode[3:6]
+            part_code = barcode[3:5]
+            part_info["part_code"] = part_code
             part_info["manufacturer"] = first_valid.get("manufacturer")
-            serial = first_valid.get("serial")
-            part_info["serial_prefix"] = serial[:4] if serial else None
+
+            # گرفتن اطلاعات از CSV
+            csv_data = get_part_info_from_csv(part_code)
+            part_info["PartName"] = csv_data.get("PartName")
+            part_info["PartNumber"] = csv_data.get("PartNumber")
+            part_info["PrintRepeatCount"] = csv_data.get("PrintRepeatCount")
 
         # --- نتیجه نهایی ---
         stats = {
