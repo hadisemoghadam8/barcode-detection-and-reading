@@ -2,9 +2,7 @@
 import csv
 from pathlib import Path
 
-# ---------------------------
-# خواندن اطلاعات PartCode از فایل CSV
-# ---------------------------
+
 def load_part_data():
     path = Path(__file__).resolve().parent.parent / "parts_config.csv"
     part_data = {}
@@ -26,9 +24,6 @@ def load_part_data():
 IKCO_PARTS = load_part_data()
 
 
-# ---------------------------
-# تحلیل بارکد ایران‌خودرو
-# ---------------------------
 def parse_barcode(barcode: str):
     """
     استخراج اطلاعات از بارکدهای ایران‌خودرو
@@ -44,14 +39,17 @@ def parse_barcode(barcode: str):
         part_code = barcode[3:5]
         serial = barcode[5:]
 
-        info = IKCO_PARTS.get(part_code, None)
+        # ایمن‌تر کردن دسترسی به داده‌های CSV
+        info = {}
+        if IKCO_PARTS and isinstance(IKCO_PARTS, dict):
+            info = IKCO_PARTS.get(part_code, {})
 
         return {
             "manufacturer": "IKCO",
             "prefix": prefix,
             "part_code": part_code,
             "serial": serial,
-            "part_info": info
+            "part_info": info or {}
         }
 
     except Exception as e:

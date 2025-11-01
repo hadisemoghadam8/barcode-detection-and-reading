@@ -1,4 +1,4 @@
-#  app/main.py
+# app/main.py
 
 from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -20,7 +20,7 @@ from enum import Enum
 
 class Manufacturer(str, Enum):
     ikco = "ikco"
-    saipa = "saipa" #ب عنوان مثالللللل
+    saipa = "saipa"
     generic = "generic"
 
 
@@ -36,10 +36,15 @@ app.add_middleware(
 )
 
 # ------------------------- بارگذاری مدل YOLO -------------------------
-model = YOLO(settings.MODEL_PATH)
+try:
+    model = YOLO(settings.MODEL_PATH)
+    print(f"[INFO] YOLO model loaded successfully from: {settings.MODEL_PATH}")
+except Exception as e:
+    print(f"[ERROR] Failed to load YOLO model: {e}")
+    model = None
 
 
-#  Endpoint: /predict/
+# ------------------------- Endpoint: /predict/ -------------------------
 @app.post("/predict/")
 async def predict_image(
     file: UploadFile = File(...),
@@ -47,20 +52,23 @@ async def predict_image(
     download_zip: bool = Form(False),
     factory: Manufacturer = Form(Manufacturer.generic)
 ):
-
     try:
         contents = await file.read()
         image = Image.open(BytesIO(contents)).convert("RGB")
         np_img = np.array(image)
 
+        if model is None:
+            return JSONResponse({"error": "YOLO model not loaded."}, status_code=500)
+
         # --- اجرای YOLO ---
-        results = model(np_img, conf=threshold)
+        results = model(np_img, conf=threshold, save=False)
         boxes = results[0].boxes.xyxy.cpu().numpy() if len(results[0].boxes) > 0 else []
+        print(f"[INFO] {len(boxes)} boxes detected.")
 
         response_data = []
         crops = []
 
-        # اگر هیچ باکسی پیدا نشد
+        # هیچ بارکدی یافت نشد
         if len(boxes) == 0:
             empty_detection = [
                 {
@@ -84,35 +92,50 @@ async def predict_image(
 
         # --- پردازش هر باکس ---
         for i, box in enumerate(boxes):
-            x1, y1, x2, y2 = map(int, box[:4])
-            crop = image.crop((x1, y1, x2, y2))
-            crops.append(crop)
+            try:
+                x1, y1, x2, y2 = map(int, box[:4])
+                crop = image.crop((x1, y1, x2, y2))
+                crops.append(crop)
 
-            buffer = BytesIO()
-            crop.save(buffer, format="JPEG")
+                buffer = BytesIO()
+                crop.save(buffer, format="JPEG")
 
-            result = read_barcode_and_batch(buffer.getvalue())
+                result = read_barcode_and_batch(buffer.getvalue()) or {}
+                print(f"[DEBUG] Crop {i} OCR result: {result}") #برای اینکه ببینی دقیقاً تابع چی برمی‌گردونه، برای موقت   
+                barcode_data = result.get("barcode_data", None)
 
-            barcode_data = result.get("barcode_data")
 
-            if factory == Manufacturer.ikco:
-                parsed = ikco.parse_barcode(barcode_data or "")
-            elif factory == Manufacturer.saipa:
-                parsed = saipa.parse_barcode(barcode_data or "")
-            else:
-                parsed = generic.parse_barcode(barcode_data or "")
+                parsed = {}
+                if factory == Manufacturer.ikco:
+                    parsed = ikco.parse_barcode(barcode_data or "") or {}
+                elif factory == Manufacturer.saipa:
+                    parsed = saipa.parse_barcode(barcode_data or "") or {}
+                else:
+                    parsed = generic.parse_barcode(barcode_data or "") or {}
 
-            response_data.append({
-                "crop_index": i,
-                "barcode_data": barcode_data,
-                "barcode_type": result.get("barcode_type"),
-                "barcode_text": result.get("barcode_text"),
-                "part_code": parsed.get("part_code"),
-                "manufacturer": parsed.get("manufacturer"),
-                "serial": parsed.get("serial"),
-                "print_repeat_count": parsed.get("part_info", {}).get("PrintRepeatCount", 1)
-            })
+                response_data.append({
+                    "crop_index": i,
+                    "barcode_data": barcode_data,
+                    "barcode_type": result.get("barcode_type"),
+                    "barcode_text": result.get("barcode_text"),
+                    "part_code": parsed.get("part_code"),
+                    "manufacturer": parsed.get("manufacturer"),
+                    "serial": parsed.get("serial"),
+                    "print_repeat_count": parsed.get("part_info", {}).get("PrintRepeatCount", 1)
+                })
 
+            except Exception as e:
+                print(f"[WARN] Error processing crop {i}: {e}")
+                response_data.append({
+                    "crop_index": i,
+                    "barcode_data": None,
+                    "barcode_type": None,
+                    "barcode_text": None,
+                    "part_code": None,
+                    "manufacturer": None,
+                    "serial": None,
+                    "print_repeat_count": 1
+                })
 
         # --- شمارش بارکدها ---
         all_barcodes = [
@@ -126,14 +149,14 @@ async def predict_image(
         duplicate_barcodes = sum(1 for c in barcode_counts.values() if c > 1)
         duplicates = {code: c for code, c in barcode_counts.items() if c > 1}
 
-        # --- افزودن شمارش و وضعیت تکرار ---
+        # --- افزودن شمارش ---
         for item in response_data:
             data = item.get("barcode_data")
             count = barcode_counts.get(data, 0)
             item["count"] = count
             item["is_duplicate"] = count > 1
 
-        # --- تولید تصویر نهایی با برچسب‌ها ---
+        # --- ترسیم مستطیل‌ها ---
         labeled = image.copy()
         draw = ImageDraw.Draw(labeled)
 
@@ -142,12 +165,8 @@ async def predict_image(
             item = response_data[i]
             data = item.get("barcode_data", "")
             count = item.get("count", 0)
-
-            # 👇 اضافه‌شده: گرفتن تعداد مجاز چاپ از اطلاعات پارت
             allowed = int(item.get("print_repeat_count", 1))
 
-
-            # 👇 رنگ و برچسب براساس مجاز بودن چاپ
             if not data or data == "No barcode detected":
                 color = "red"
                 label_text = "x0"
@@ -161,25 +180,21 @@ async def predict_image(
             draw.rectangle((x1, y1, x2, y2), outline=color, width=3)
             draw.text((x1, max(0, y1 - 18)), label_text, fill=color)
 
+        # --- اطلاعات پارت ---
+        part_info = {
+            "part_code": None,
+            "manufacturer": None,
+            "serial_prefix": None
+        }
 
-        # استخراج اطلاعات عمومی پارت از اولین بارکد معتبر
         first_valid = next((item for item in response_data if item.get("part_code")), None)
-
-        # همیشه مقداردهی اولیه انجام بده تا خطا نده
-        if 'part_info' not in locals():
-            part_info = {
-                "part_code": None,
-                "manufacturer": None,
-                "serial_prefix": None
-            }
-
         if first_valid:
             part_info["part_code"] = first_valid.get("part_code")
             part_info["manufacturer"] = first_valid.get("manufacturer")
             serial = first_valid.get("serial")
             part_info["serial_prefix"] = serial[:4] if serial else None
 
-        #بخش اخر که جیسون ساخته میشه . خطوط پایانی بعد از ترسیم تصویر
+        # --- نتیجه نهایی ---
         stats = {
             "message": "✅ Barcode detection completed.",
             "threshold": threshold,
@@ -200,11 +215,11 @@ async def predict_image(
             ]
         }
 
-        #  حالت JSON (پیش‌فرض)
+        # حالت JSON
         if not download_zip:
             return JSONResponse(stats)
 
-        #  ساخت ZIP (اختیاری)
+        # حالت ZIP
         zip_buffer = BytesIO()
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
             labeled_bytes = BytesIO()
@@ -234,6 +249,5 @@ async def predict_image(
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-#  مسیر استاتیک برای نمایش فایل‌ها
-
+# ------------------------- مسیر فایل‌های استاتیک -------------------------
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
